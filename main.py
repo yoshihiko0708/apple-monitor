@@ -3,7 +3,7 @@ import requests
 import json
 
 # 通知したい機種のキーワード
-TARGET_MODELS = ["iPhone 15", "iPhone 16", "iPhone 17"]
+TARGET_MODELS = ["iPhone 15 Pro Max", "iPhone 16", "iPhone 17"]
 
 def check_apple_store():
     # Appleのデータ取得用URL
