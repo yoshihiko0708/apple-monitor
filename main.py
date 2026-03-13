@@ -3,7 +3,7 @@ import requests
 import re
 
 # 通知したい機種のキーワード（短くするのがコツです）
-TARGET_MODELS = ["15 Pro Max", "16", "17"]
+TARGET_MODELS = ["16", "17"]
 
 def check_apple_store():
     url = "https://www.apple.com/jp/shop/refurbished/iphone"
