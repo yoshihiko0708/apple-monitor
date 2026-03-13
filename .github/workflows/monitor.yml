@@ -1,18 +1,18 @@
 name: Apple Store Monitor
 on:
   schedule:
-    - cron: '*/15 * * * *' # 15分おきに実行
-  workflow_dispatch: # 手動実行ボタンも作る
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5 # v4 から v5 へ
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # v4 から v5 へ
         with:
-          python-version: '3.9'
+          python-version: '3.11' # ついでにPythonも新しめに
       - name: Install dependencies
         run: pip install requests
       - env:
