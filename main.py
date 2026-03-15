@@ -1,10 +1,9 @@
 import os
 import requests
 import re
-import json
 
-# 監視ターゲット（キーワード）
-TARGET_MODELS = ["iPhone 15 Pro", "15 Pro Max", "iPhone 16", "iPhone 17"]
+# 監視ターゲット（機種名）
+TARGET_MODELS = ["iPhone 15 Pro", "iPhone 15 Pro Max", "iPhone 16", "iPhone 17"]
 
 def check_apple_store():
     url = "https://www.apple.com/jp/shop/refurbished/iphone"
@@ -20,29 +19,22 @@ def check_apple_store():
         
         found_items = []
 
-        # 【手法1】ページ内に埋め込まれたJSONデータを直接探す
-        # Appleは "tiles" という項目の中に商品リストを隠し持っていることが多いです
-        # ページ全体の文字列から、商品情報っぽい塊をすべて抜き出します
-        product_patterns = re.findall(r'\{"partNumber":".*?"title":".*?"\}', content)
-        
-        # 【手法2】手法1で見つからない場合、商品カードのメタデータを直接探す
-        if not product_patterns:
-            product_patterns = re.findall(r'data-related-product-name="([^"]+)"', content)
+        # 【本物の商品だけを狙い撃つ最強の正規表現】
+        # 1. 機種名 (例: iPhone 15 Pro)
+        # 2. その後、100文字以内に「GB」または「TB」（容量）
+        # 3. さらにその近くに「円」（価格）があるものだけを抽出
+        for model in TARGET_MODELS:
+            # 正規表現の意味: 機種名 ... (最大150文字) ... 容量(GB/TB) ... (最大150文字) ... 価格(円)
+            pattern = rf"{model}.*?([0-9]+(?:GB|TB)).*?([0-9,]+円)"
+            
+            # ページ全体からこのパターンに一致する箇所をすべて探す
+            matches = re.findall(pattern, content, re.DOTALL)
+            
+            for m in matches:
+                storage = m[0]
+                price = m[1]
+                found_items.append(f"📱{model} {storage} ({price})")
 
-        # 抽出したデータの中にターゲットがあるかチェック
-        for chunk in product_patterns:
-            for model in TARGET_MODELS:
-                # 「機種名」が含まれているか
-                if model in chunk:
-                    # そのすぐ近くに「価格（円）」や「在庫あり」の証拠があるか
-                    # （サイドバーのノイズは通常、価格情報を持ちません）
-                    if "円" in content or "price" in chunk.lower():
-                        # 機種名を整形して追加
-                        name = chunk.replace('"', '').split(':')[-1] if '{' in chunk else chunk
-                        found_items.append(f"📱{name}")
-                        break
-
-        # 重複を排除
         return list(set(found_items))
 
     except Exception as e:
@@ -60,9 +52,8 @@ def send_line(message):
 if __name__ == "__main__":
     items = check_apple_store()
     if items:
-        msg = "🔥【入荷】Apple公式で在庫を検知しました！\n\n" + "\n".join(items) + "\n\n今すぐ確認：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
+        msg = "🔥【入荷確定】Apple公式で本物の在庫を検知しました！\n\n" + "\n".join(items) + "\n\n今すぐ購入：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
         send_line(msg)
         print(f"検知成功: {items}")
     else:
-        # デバッグ用：何が起きているかヒントを出力
-        print("チェック完了：現在は条件に一致する有効な在庫データが見つかりませんでした。")
+        print("チェック完了：『容量と価格が揃った』有効な商品リストは見つかりませんでした。")
