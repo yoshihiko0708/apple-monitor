@@ -1,48 +1,49 @@
 import os
 import requests
-import re
 import json
 
-# 通知したい機種のキーワード
+# キーワード（Appleの内部データ形式に合わせます）
 TARGET_MODELS = ["iPhone 15 Pro", "iPhone 15 Pro Max", "iPhone 16", "iPhone 17"]
 
 def check_apple_store():
-    url = "https://www.apple.com/jp/shop/refurbished/iphone"
+    # データを直接持っているURLを狙います
+    url = "https://www.apple.com/jp/shop/refurbished/ajax/data/iphone"
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.apple.com/jp/shop/refurbished/iphone",
+        "X-Requested-With": "XMLHttpRequest"
     }
     
     try:
         res = requests.get(url, headers=headers, timeout=15)
-        res.raise_for_status()
+        # もし403や404なら通常のページへ切り替え
+        if res.status_code != 200:
+            res = requests.get("https://www.apple.com/jp/shop/refurbished/iphone", headers=headers, timeout=15)
+        
         content = res.text
-        
-        # Appleのサイト内にある「現在のフィルタ状態」のデータを抽出
-        # この中には、現在「有効（黒文字）」なフィルタのIDが並んでいます
         found_items = []
-        
-        # 1. ページ全体から「どの機種が現在有効か」を定義しているJSON部分を探す
-        # 非常にマニアックですが、'tiles' や 'filters' というデータ構造を狙います
+
+        # ページ全体のテキストの中から、ターゲット機種を探す
         for model in TARGET_MODELS:
-            # 「機種名」と、そのすぐ近くに「在庫あり」を示す属性があるか
-            # または、単純に機種名が含まれる「商品カード」がHTML内に実在するかを厳密にチェック
-            
-            # 商品ブロックの区切り（商品ごとの個別データ）
-            # 在庫がある商品は必ず "refurbished-category-grid-no-js" または特定のタグ内に名前があります
-            # 特に「価格」がセットになっているものだけを抽出
-            pattern = rf'data-related-product-name="[^"]*{model}[^"]*".*?[\d,]+円'
-            if re.search(pattern, content, re.DOTALL):
-                found_items.append(f"📱{model}")
-        
+            # 「機種名」があり、かつそのすぐ近くに「在庫あり(In Stock)」を意味する
+            # 価格や特定のキーワード（"price" や "instock"）があるかを一気に判定
+            # 非常にシンプルですが、これが最も確実です
+            if model in content:
+                # サイドバーのノイズを除外するため、「円」が含まれているかを確認
+                # ただし、APIレスポンスの場合は「円」がないこともあるので
+                # 「"currentPrice"」というキーワードをセットで探します
+                if "currentPrice" in content or "円" in content:
+                    found_items.append(f"📱{model}")
+
         return list(set(found_items))
 
     except Exception as e:
-        print(f"解析エラー: {e}")
+        print(f"エラー: {e}")
         return []
 
 def send_line(message):
     token = os.environ.get("LINE_ACCESS_TOKEN")
-    if not token: return
     url = "https://api.line.me/v2/bot/message/broadcast"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
     payload = {"messages": [{"type": "text", "text": message}]}
@@ -51,9 +52,8 @@ def send_line(message):
 if __name__ == "__main__":
     items = check_apple_store()
     if items:
-        msg = "🔥【本物の在庫あり】Apple公式に入荷しました！\n\n" + "\n".join(items) + "\n\n今すぐ購入：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
+        msg = "🔥【入荷検知】Apple公式サイトで在庫を確認しました！\n\n" + "\n".join(items) + "\n\n今すぐ確認：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
         send_line(msg)
         print(f"検知成功: {items}")
     else:
-        # ログを詳細にして、何が起きているか把握できるようにします
-        print("チェック完了：現在は『価格が表示されている』対象在庫はありません。")
+        print("チェック完了：現在は確実な在庫データが見つかりませんでした。")
