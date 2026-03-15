@@ -17,41 +17,43 @@ def check_apple_store():
         res.raise_for_status()
         content = res.text
         
-        # 1. サイドバー（フィルター）のHTMLブロックを特定
-        # 「モデル」という見出しから始まるセクションを抽出
-        sidebar_section = ""
+        # 1. フィルター（サイドバー）のエリアを特定
         sidebar_match = re.search(r'fieldset role="group".*?iPhone', content, re.DOTALL)
-        if sidebar_match:
-            sidebar_section = sidebar_match.group(0)
-        else:
-            # セクションが見つからない場合は安全のため全体を対象にする
-            sidebar_section = content
+        search_area = sidebar_match.group(0) if sidebar_match else content
 
         found_items = []
         
-        # 2. サイドバー内のリンク（<a>タグ）をすべて抽出
-        # <a ...><span>機種名</span></a> のような構造を探します
-        links = re.findall(r'<a[^>]*>(.*?)</a>', sidebar_section, re.DOTALL)
+        # 2. 各機種の「入力要素（input）」と「ラベル」の塊を解析
+        # Appleのサイトでは通常 <input ...> と <label ...> がセットになっています
+        # 在庫がないものは input に 'disabled' が付いています
         
-        for link_text in links:
-            for model in TARGET_MODELS:
-                # リンクのテキストの中に機種名が含まれているか
-                # かつ、その機種名がターゲットと一致するか
-                if model in link_text:
-                    found_items.append(f"📱{model}")
-                    break # このリンクで一つ見つかれば十分
+        # 各モデルごとにループ
+        for model in TARGET_MODELS:
+            # 正規表現の解説:
+            # 1. <li ...> から </li> までの塊を探す
+            # 2. その中に機種名（model）が含まれている
+            # 3. かつ、その塊の中に 'disabled' という文字が含まれて「いない」
+            
+            # 商品ごとのリスト項目を取得
+            items = re.findall(r'<li[^>]*>.*?</li>', search_area, re.DOTALL)
+            
+            for item in items:
+                if model in item:
+                    if 'disabled' not in item:
+                        # 'disabled' が含まれていなければ「黒文字（有効）」と判定
+                        found_items.append(f"📱{model}")
+                        break
         
-        return list(set(found_items)) # 重複を除去
+        return list(set(found_items))
 
     except Exception as e:
-        print(f"データ取得エラー: {e}")
+        print(f"解析エラー: {e}")
         return []
 
 def send_line(message):
     token = os.environ.get("LINE_ACCESS_TOKEN")
     if not token: return
     
-    # 全員に一斉送信するモード
     url = "https://api.line.me/v2/bot/message/broadcast"
     headers = {
         "Content-Type": "application/json",
@@ -65,7 +67,8 @@ def send_line(message):
 if __name__ == "__main__":
     items = check_apple_store()
     if items:
-        msg = "🔥【在庫復活】Apple公式で選択可能になりました！\n\n" + "\n".join(items) + "\n\n今すぐチェック：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
+        msg = "🔥【在庫あり】Apple公式で選択可能になりました！\n\n" + "\n".join(items) + "\n\n今すぐチェック：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
         send_line(msg)
+        print(f"検知しました: {items}")
     else:
-        print("チェック完了：現在はリンクが有効な対象在庫はありません。")
+        print("チェック完了：現在は選択可能な（黒文字の）対象在庫はありません。")
