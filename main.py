@@ -2,8 +2,8 @@ import os
 import requests
 import re
 
-# 通知したい機種のキーワード（短くするのがコツです）
-TARGET_MODELS = ["16", "17"]
+# キーワード
+TARGET_MODELS = ["iPhone 16", "iPhone 17"]
 
 def check_apple_store():
     url = "https://www.apple.com/jp/shop/refurbished/iphone"
@@ -17,50 +17,41 @@ def check_apple_store():
         res.raise_for_status()
         content = res.text
         
-        found_items = []
+        # 【最重要】サイドバーのメニュー部分をまるごとカットします
+        # 商品が並び始める「grid」よりも前の部分は検索対象から外します
+        if 'class="refurbished-category-grid"' in content:
+            main_content = content.split('class="refurbished-category-grid"')[1]
+        else:
+            main_content = content
+
+        # 商品カードごとに分割
+        products_blocks = main_content.split('class="refurbished-category-grid-item')
         
-        # ページを「商品カード」ごとに分割します
-        # 整備済製品の各商品は通常 <li> タグなどで区切られています
-        products_blocks = content.split('<li class="refurbished-category-grid-no-js">')
+        found_items = []
         
         for block in products_blocks:
             for model in TARGET_MODELS:
-                # 1. そのブロックの中に機種名（15 Proなど）が含まれているか
-                # 2. かつ、同じブロック内に「円」という文字があるか（＝価格が表示されている）
-                if model in block and "円" in block:
-                    # 商品名をきれいに抽出（HTMLタグを除去）
-                    name_match = re.search(r'title="([^"]+)"', block)
+                # 1. 機種名が含まれている
+                # 2. かつ、「お届け」や「受取」などの購入可能ワードがある
+                # 3. かつ、「円」という価格表示がある
+                if model in block and ("お届け" in block or "受取" in block) and "円" in block:
+                    
+                    # より正確な商品名を取得
+                    name_match = re.search(r'data-related-product-name="([^"]+)"', block)
+                    if not name_match:
+                        name_match = re.search(r'title="([^"]+)"', block)
+                    
                     name = name_match.group(1) if name_match else f"iPhone {model}"
                     
-                    found_items.append(f"📱{name}")
-                    break # 1つのブロックで1つ見つかれば次へ
+                    # ゴミデータ（サイドバーの名残りなど）を拾わないためのガード
+                    if len(name) < 50: # あまりに長い名前は除外
+                        found_items.append(name)
+                    break
         
-        return list(set(found_items)) # 重複を除去
+        return list(set(found_items))
 
     except Exception as e:
         print(f"データ取得エラー: {e}")
         return []
 
-# send_line関数は「全員に送る（broadcast）」に書き換えておきます
-def send_line(message):
-    token = os.environ.get("LINE_ACCESS_TOKEN")
-    if not token: return
-    
-    url = "https://api.line.me/v2/bot/message/broadcast"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
-    }
-    payload = {
-        "messages": [{"type": "text", "text": message}]
-    }
-    res = requests.post(url, headers=headers, json=payload)
-    print(f"LINE送信結果: {res.status_code}")
-
-if __name__ == "__main__":
-    items = check_apple_store()
-    if items:
-        msg = "🔥Apple公式に入荷しました！\n\n" + "\n".join(items) + "\n\n確認はこちら：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
-        send_line(msg)
-    else:
-        print("チェック完了：現在は指定の在庫はありません。")
+# send_line, main の部分は前回と同様です
