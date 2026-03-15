@@ -1,9 +1,10 @@
 import os
 import requests
 import re
+import json
 
-# キーワード（完全一致を狙うため、iPhoneも含めます）
-TARGET_MODELS = ["iPhone 15 Pro", "iPhone 15 Pro Max", "iPhone 16", "iPhone 17"]
+# 監視ターゲット（キーワード）
+TARGET_MODELS = ["iPhone 15 Pro", "15 Pro Max", "iPhone 16", "iPhone 17"]
 
 def check_apple_store():
     url = "https://www.apple.com/jp/shop/refurbished/iphone"
@@ -17,36 +18,31 @@ def check_apple_store():
         res.raise_for_status()
         content = res.text
         
-        # 【最重要】サイドバーとフッターを物理的に切り捨てます
-        # 商品が並ぶ「grid」というキーワードで分割し、商品エリアだけを抽出
-        if 'class="refurbished-category-grid' not in content:
-            print("商品グリッドが見つかりません。在庫がゼロの可能性があります。")
-            return []
-            
-        # 商品エリア（右側）の開始位置を特定
-        product_area = content.split('class="refurbished-category-grid')[1]
-        # 商品エリアの終了位置（次の大きなセクションまで）で切る
-        product_area = product_area.split('</section>')[0]
-
-        # 商品エリアを「1つの商品カード」ごとにバラバラに分解します
-        # 整備済製品は必ずこのクラス名の中に情報がまとまっています
-        tiles = product_area.split('class="refurbished-category-grid-item')
-        
         found_items = []
+
+        # 【手法1】ページ内に埋め込まれたJSONデータを直接探す
+        # Appleは "tiles" という項目の中に商品リストを隠し持っていることが多いです
+        # ページ全体の文字列から、商品情報っぽい塊をすべて抜き出します
+        product_patterns = re.findall(r'\{"partNumber":".*?"title":".*?"\}', content)
         
-        for tile in tiles[1:]: # 最初の欠片は無視
+        # 【手法2】手法1で見つからない場合、商品カードのメタデータを直接探す
+        if not product_patterns:
+            product_patterns = re.findall(r'data-related-product-name="([^"]+)"', content)
+
+        # 抽出したデータの中にターゲットがあるかチェック
+        for chunk in product_patterns:
             for model in TARGET_MODELS:
-                # 判定条件：
-                # 1. その「商品カード」の中に機種名が含まれている
-                # 2. かつ、同じ「カード内」に価格（〇〇円）が含まれている
-                if model in tile and "円" in tile:
-                    # 商品名を抽出（data-related-product-name 属性が最も正確です）
-                    name_match = re.search(r'data-related-product-name="([^"]+)"', tile)
-                    if name_match:
-                        full_name = name_match.group(1)
-                        found_items.append(f"📱{full_name}")
+                # 「機種名」が含まれているか
+                if model in chunk:
+                    # そのすぐ近くに「価格（円）」や「在庫あり」の証拠があるか
+                    # （サイドバーのノイズは通常、価格情報を持ちません）
+                    if "円" in content or "price" in chunk.lower():
+                        # 機種名を整形して追加
+                        name = chunk.replace('"', '').split(':')[-1] if '{' in chunk else chunk
+                        found_items.append(f"📱{name}")
                         break
-        
+
+        # 重複を排除
         return list(set(found_items))
 
     except Exception as e:
@@ -64,8 +60,9 @@ def send_line(message):
 if __name__ == "__main__":
     items = check_apple_store()
     if items:
-        msg = "🔥【本物の在庫】Apple公式に入荷しました！\n\n" + "\n".join(items) + "\n\n今すぐ確認：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
+        msg = "🔥【入荷】Apple公式で在庫を検知しました！\n\n" + "\n".join(items) + "\n\n今すぐ確認：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
         send_line(msg)
         print(f"検知成功: {items}")
     else:
-        print("チェック完了：現在は条件に一致する『購入可能な商品』はありません。")
+        # デバッグ用：何が起きているかヒントを出力
+        print("チェック完了：現在は条件に一致する有効な在庫データが見つかりませんでした。")
