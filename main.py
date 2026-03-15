@@ -1,51 +1,60 @@
 import os
 import requests
 import json
+import re
 
 # 通知したい機種のキーワード
 TARGET_MODELS = ["15 Pro", "15 Pro Max", "16", "17"]
 
 def check_apple_store():
-    # データを直接持っているURL
-    url = "https://www.apple.com/jp/shop/refurbished/ajax/data/iphone"
+    # 誰でもアクセスできるメインページをターゲットにします
+    url = "https://www.apple.com/jp/shop/refurbished/iphone"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.apple.com/jp/shop/refurbished/iphone",
-        "X-Requested-With": "XMLHttpRequest"
+        "Accept-Language": "ja-JP,ja;q=0.9",
     }
     
     try:
         res = requests.get(url, headers=headers, timeout=15)
-        if res.status_code != 200:
-            print(f"データ取得失敗: {res.status_code}")
-            return []
+        res.raise_for_status()
+        content = res.text
         
-        data = res.json()
+        # Appleのページ内にある "tiles" という変数に格納された在庫データを抽出します
+        # これはブラウザが商品を表示するために使っている「生のリスト」です
         found_items = []
-
-        # Appleのデータ構造を深く解析します
-        # data -> products の中に全商品のリストが入っています
-        products = data.get('data', {}).get('products', [])
         
-        for product in products:
-            product_name = product.get('productName', '')
+        # ページ内のJavaScriptデータ（JSON部分）を正規表現で切り出します
+        data_match = re.search(r'window\.REFURB_GRID_DATA\s*=\s*({.*?});', content, re.DOTALL)
+        
+        if data_match:
+            # 生データが見つかった場合（JSON解析）
+            raw_json = data_match.group(1)
+            data = json.loads(raw_json)
+            products = data.get('tiles', [])
             
-            # 1. ターゲットの機種名が含まれているか
-            for target in TARGET_MODELS:
-                if target in product_name:
-                    # 2. 【最重要】在庫があるかどうかをAppleのデータから直接判定
-                    # Appleの内部データでは商品の「購入可能性」が定義されています
-                    is_full_price = product.get('isFullPrice', False) # 通常、整備済はここが重要
-                    
-                    # より確実なのは、価格が存在し、かつ特定の「在庫ステータス」を見ることです
-                    # 整備済製品データにおいて、このリストに載っている＝在庫候補ですが、
-                    # さらに絞り込むため、価格情報を確認します。
-                    price = product.get('price', {}).get('currentPrice', {}).get('amount', '0')
-                    
-                    if float(price.replace(',', '')) > 0:
-                        found_items.append(f"📱{product_name} (￥{price})")
+            for product in products:
+                # 商品名と価格、在庫状況を取得
+                name = product.get('title', '')
+                # 商品カードとして存在している＝在庫がある証拠
+                for target in TARGET_MODELS:
+                    if target in name:
+                        price = product.get('price', '')
+                        found_items.append(f"📱{name} ({price})")
                         break
+        else:
+            # 生データが見つからない場合の予備手段（HTMLから直接抽出）
+            # 商品カードのタイトル属性と価格が両方あるものだけを抜く
+            blocks = content.split('class="refurbished-category-grid-item')
+            for block in blocks[1:]: # 最初の分割はゴミなので飛ばす
+                for target in TARGET_MODELS:
+                    if target in block and "円" in block:
+                        # リンクやサイドバーではなく、商品詳細が含まれるカードのみ
+                        name_match = re.search(r'data-related-product-name="([^"]+)"', block)
+                        if name_match:
+                            name = name_match.group(1)
+                            found_items.append(f"📱{name}")
+                            break
 
         return list(set(found_items))
 
@@ -64,7 +73,6 @@ def send_line(message):
 if __name__ == "__main__":
     items = check_apple_store()
     if items:
-        # 在庫があるものだけを通知
         msg = "🔥【本物の在庫あり】Apple公式に入荷しました！\n\n" + "\n".join(items) + "\n\n今すぐ購入：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
         send_line(msg)
         print(f"検知成功: {items}")
