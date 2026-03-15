@@ -2,7 +2,7 @@ import os
 import requests
 import re
 
-# キーワード
+# 通知したい機種のキーワード
 TARGET_MODELS = ["iPhone 15 Pro", "iPhone 15 Pro Max", "iPhone 16", "iPhone 17"]
 
 def check_apple_store():
@@ -17,41 +17,55 @@ def check_apple_store():
         res.raise_for_status()
         content = res.text
         
-        # 【最重要】サイドバーのメニュー部分をまるごとカットします
-        # 商品が並び始める「grid」よりも前の部分は検索対象から外します
-        if 'class="refurbished-category-grid"' in content:
-            main_content = content.split('class="refurbished-category-grid"')[1]
+        # 1. サイドバー（フィルター）のHTMLブロックを特定
+        # 「モデル」という見出しから始まるセクションを抽出
+        sidebar_section = ""
+        sidebar_match = re.search(r'fieldset role="group".*?iPhone', content, re.DOTALL)
+        if sidebar_match:
+            sidebar_section = sidebar_match.group(0)
         else:
-            main_content = content
+            # セクションが見つからない場合は安全のため全体を対象にする
+            sidebar_section = content
 
-        # 商品カードごとに分割
-        products_blocks = main_content.split('class="refurbished-category-grid-item')
-        
         found_items = []
         
-        for block in products_blocks:
-            for model in TARGET_MODELS:
-                # 1. 機種名が含まれている
-                # 2. かつ、「お届け」や「受取」などの購入可能ワードがある
-                # 3. かつ、「円」という価格表示がある
-                if model in block and ("お届け" in block or "受取" in block) and "円" in block:
-                    
-                    # より正確な商品名を取得
-                    name_match = re.search(r'data-related-product-name="([^"]+)"', block)
-                    if not name_match:
-                        name_match = re.search(r'title="([^"]+)"', block)
-                    
-                    name = name_match.group(1) if name_match else f"iPhone {model}"
-                    
-                    # ゴミデータ（サイドバーの名残りなど）を拾わないためのガード
-                    if len(name) < 50: # あまりに長い名前は除外
-                        found_items.append(name)
-                    break
+        # 2. サイドバー内のリンク（<a>タグ）をすべて抽出
+        # <a ...><span>機種名</span></a> のような構造を探します
+        links = re.findall(r'<a[^>]*>(.*?)</a>', sidebar_section, re.DOTALL)
         
-        return list(set(found_items))
+        for link_text in links:
+            for model in TARGET_MODELS:
+                # リンクのテキストの中に機種名が含まれているか
+                # かつ、その機種名がターゲットと一致するか
+                if model in link_text:
+                    found_items.append(f"📱{model}")
+                    break # このリンクで一つ見つかれば十分
+        
+        return list(set(found_items)) # 重複を除去
 
     except Exception as e:
         print(f"データ取得エラー: {e}")
         return []
 
-# send_line, main の部分は前回と同様です
+def send_line(message):
+    token = os.environ.get("LINE_ACCESS_TOKEN")
+    if not token: return
+    
+    # 全員に一斉送信するモード
+    url = "https://api.line.me/v2/bot/message/broadcast"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    payload = {
+        "messages": [{"type": "text", "text": message}]
+    }
+    requests.post(url, headers=headers, json=payload)
+
+if __name__ == "__main__":
+    items = check_apple_store()
+    if items:
+        msg = "🔥【在庫復活】Apple公式で選択可能になりました！\n\n" + "\n".join(items) + "\n\n今すぐチェック：\nhttps://www.apple.com/jp/shop/refurbished/iphone"
+        send_line(msg)
+    else:
+        print("チェック完了：現在はリンクが有効な対象在庫はありません。")
