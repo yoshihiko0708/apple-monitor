@@ -3,7 +3,7 @@ import requests
 import re
 
 # キーワード
-TARGET_MODELS = ["iPhone 16", "iPhone 17"]
+TARGET_MODELS = ["iPhone 15 Pro", "iPhone 15 Pro Max", "iPhone 16", "iPhone 17"]
 
 def check_apple_store():
     url = "https://www.apple.com/jp/shop/refurbished/iphone"
